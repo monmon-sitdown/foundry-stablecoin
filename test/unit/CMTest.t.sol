@@ -10,14 +10,9 @@ import {HelperConfig} from "../../script/HelperConfig.s.sol";
 
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 
-/**
- * @title CMTest
- * @dev A test contract for the CollateralManager and SimpleStableCoin.
- *      This contract sets up the environment for testing the functionality
- *      of the CollateralManager, including depositing collateral,
- *      handling edge cases like zero deposits and unsupported tokens.
- */
 contract CMTest is Test {
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
+
     DeployCollateralManager deployer;
 
     CollateralManager public cm;
@@ -25,235 +20,288 @@ contract CMTest is Test {
     HelperConfig public helperConfig;
 
     address public ethUsdPriceFeed;
-    address public btcUsdPriceFeed;
     address public weth;
-    address public wbtc;
     uint256 public deployerKey;
 
-    address[] public tokenAddresses;
-    address[] public feedAddresses;
+    address public tokenAddresses;
+    address public feedAddresses;
 
     ERC20Mock private wethMock;
-    ERC20Mock private wbtcMock;
 
     address public user = makeAddr("user");
 
     uint256 public constant STARTING_USER_BALANCE = 1000 ether;
 
-    /**
-     * @dev Sets up the testing environment before each test.
-     *      Deploys the DeployCollateralManager script, initializes the
-     *      CollateralManager and SimpleStableCoin contracts, and mints
-     *      mock WETH and WBTC tokens for the user.
-     *      The user's starting balance is set to 10 ether.
-     */
     function setUp() public {
         deployer = new DeployCollateralManager();
         (ssc, cm, helperConfig) = deployer.run();
-        (ethUsdPriceFeed, btcUsdPriceFeed, weth, wbtc, deployerKey) = helperConfig.activeNetworkConfig();
+        (ethUsdPriceFeed, weth, deployerKey) = helperConfig.activeNetworkConfig();
 
         // Deploy Mock Tokens
         wethMock = ERC20Mock(weth);
-        wbtcMock = ERC20Mock(wbtc);
+
         //The user mints some tokens
         wethMock.mint(user, STARTING_USER_BALANCE);
-        wbtcMock.mint(user, STARTING_USER_BALANCE);
     }
 
-    ////////////////Test Deposit///////////////////
-
-    /**
-     * @dev Tests the deposit of collateral into the CollateralManager.
-     *      The user approves a specified amount of WETH and deposits it.
-     *      Asserts that the expected deposited amount matches the actual
-     *      collateral amount recorded for the user in the CollateralManager.
-     */
-    function testDepositCollateral() public {
-        uint256 amountDeposit = 10 ether;
-
+    ///DepositCollateral
+    function testDepositCollateralSuccess() public {
+        uint256 depositAmount = 100 ether;
         vm.startPrank(user);
-        wethMock.approve(address(cm), amountDeposit);
+        uint256 initialAmount = cm.getAccountCollateralValueETH(user, weth);
 
-        //Deposits collateral
-        cm.depositCollateral(address(wethMock), amountDeposit);
+        wethMock.approve(address(cm), depositAmount);
+        cm.depositCollateral(address(wethMock), depositAmount);
 
-        //Check the collateral amount of user account
-        uint256 expectedDepositedAmount = cm.userCollateral(user, address(wethMock));
+        uint256 depositedAmount = cm.getAccountCollateralValueETH(user, weth);
         vm.stopPrank();
 
-        assertEq(expectedDepositedAmount, amountDeposit);
+        assertEq(depositedAmount, initialAmount + depositAmount);
     }
 
-    /**
-     * @dev Tests that a deposit of zero amount reverts the transaction.
-     *      Expects the revert reason to match the defined error in
-     *      CollateralManager indicating that the amount must be greater than zero.
-     */
-    function testDepositZeroAmount() public {
-        //Expect Revert
+    function testDepositCollateralFailsZeroAmount() public {
+        vm.startPrank(user);
+
         vm.expectRevert(CollateralManager.CM__NeedsMoreThanZero.selector);
         cm.depositCollateral(address(wethMock), 0);
+        vm.stopPrank();
     }
 
-    /**
-     * @dev Tests the deposit of an unsupported token into the CollateralManager.
-     *      Mints a new ERC20Mock token for the user and attempts to deposit it.
-     *      Expects the transaction to revert with an error indicating
-     *      that the token is not allowed for collateral deposits.
-     */
-    function testDepositNotAllowedToken() public {
-        uint256 amountDeposit = 10 ether;
-        ERC20Mock anotherToken = new ERC20Mock();
-        vm.startPrank(user);
-        anotherToken.mint(user, amountDeposit);
-        anotherToken.approve(address(cm), amountDeposit);
+    function testDepositCollateralFailsUnallowedToken() public {
+        address unallowedToken = address(new ERC20Mock());
+        uint256 depositAmount = 100 ether;
 
+        vm.startPrank(user);
         vm.expectRevert(CollateralManager.CM__NotAllowedToken.selector);
-        cm.depositCollateral(address(anotherToken), amountDeposit);
+        cm.depositCollateral(unallowedToken, depositAmount);
+
         vm.stopPrank();
     }
 
-    /**
-     * @dev Tests the scenario where the transfer of collateral fails.
-     *      Mocks the transferFrom function to return false, simulating
-     *      a transfer failure. Expects the transaction to revert with
-     *      an error indicating that the transfer failed.
-     */
-    function testTransferFailed() public {
-        vm.startPrank(user);
-        // mock transferFrom failed
-        vm.mockCall(
-            address(wethMock), abi.encodeWithSignature("transferFrom(address,address,uint256)"), abi.encode(false)
-        );
-
-        // 期望抛出异常
-        vm.expectRevert(CollateralManager.CM__TransferFailed.selector);
-        cm.depositCollateral(address(wethMock), 10 ether);
-        vm.stopPrank();
-    }
-
-    ///////////////Test Mint/////////////
-
-    function testMintSsc() public {
-        //Deposits collateral
-        uint256 amountDeposit = 100;
-
-        vm.startPrank(user);
-        wethMock.approve(address(cm), amountDeposit);
-
-        cm.depositCollateral(address(wethMock), amountDeposit);
-
-        //mint SSC
-        uint256 amountToMint = 50; //200%collateral
-
-        vm.startPrank(user);
-        cm.mintSsc(amountToMint);
-        vm.stopPrank();
-
-        uint256 totalMinted = cm.userSSCminted(user);
-        assertEq(totalMinted, amountToMint);
-    }
-
-    function testMintSscExceedsLimit() public {
-        uint256 MAX_SSC_PER_USER = 1000;
-        uint256 amountToMint = MAX_SSC_PER_USER + 1;
-
-        //mint
-        vm.startPrank(user);
-        vm.expectRevert(CollateralManager.CM__MintFailed.selector);
-        cm.mintSsc(amountToMint);
-        vm.stopPrank();
-    }
-
-    function testMintSscHealthFactorBroken() public {
-        uint256 PRECISION = 1e18;
-        // Deposit Collateral
-        uint256 amountDeposit = 100 ether;
-        vm.startPrank(user);
-        wethMock.approve(address(cm), amountDeposit);
-        cm.depositCollateral(address(wethMock), amountDeposit);
-
-        // Calculate the health factor
-        // Actually the ssc anchored to USD
-        uint256 amountToMint = 90 ether; // over 50eth which is the limitation
-        uint256 valueToMint = amountToMint * 2000; //mock price of eth is 2000
-
-        uint256 collateralValueInUsd = cm.getAccountCollateralValue(user); // get the usd value of collteral
-        uint256 currentHealthFactor = cm.calculateHealthFactor(valueToMint, collateralValueInUsd);
-        console.log(collateralValueInUsd / PRECISION);
-        console.log(currentHealthFactor < PRECISION);
-
-        vm.expectRevert(abi.encodeWithSelector(CollateralManager.CM__BreakHealthFactor.selector, currentHealthFactor));
-        cm.mintSsc(valueToMint);
-        vm.stopPrank();
-    }
-
-    //////////////////Test Redeem Collateral//////////////////
-    function testRedeemCollateral() public {
-        // Deposit Collateral
-        uint256 amountDeposit = 100 ether;
-        vm.startPrank(user);
-        wethMock.approve(address(cm), amountDeposit);
-        cm.depositCollateral(address(wethMock), amountDeposit);
-
-        uint256 amountToMint = 10 ether;
-        uint256 valueToMint = amountToMint * 2000;
-        cm.mintSsc(valueToMint);
-
+    function testDepositCollateralUpdatesUserBalance() public {
         // Arrange
-        uint256 redeemAmount = 10 ether; // The amount of redeem
+        vm.startPrank(user); // Start simulating actions for the user
+        uint256 depositAmount = 100 ether;
+        uint256 initialContractBalance = wethMock.balanceOf(address(cm));
+        uint256 initialUserBalance = wethMock.balanceOf(user);
 
         // Act
-        cm.redeemCollateral(address(wethMock), redeemAmount);
+        wethMock.approve(address(cm), depositAmount);
+        cm.depositCollateral(address(wethMock), depositAmount);
 
         // Assert
-        uint256 expectedBalance = amountDeposit - redeemAmount;
-        uint256 userBalance = cm.userCollateral(user, address(wethMock)); // 假设有这个函数
-        assertEq(userBalance, expectedBalance, "User collateral balance should be updated correctly.");
+        uint256 finalContractBalance = wethMock.balanceOf(address(cm));
+        uint256 finalUserBalance = wethMock.balanceOf(user);
+
+        assertEq(
+            finalContractBalance, initialContractBalance + depositAmount, "Contract should have the deposited amount"
+        );
+        assertEq(
+            finalUserBalance, initialUserBalance - depositAmount, "User balance should be reduced by the deposit amount"
+        );
+
+        vm.stopPrank();
     }
 
-    function testRedeemCollateralHealthFactorBroken() public {
-        // Deposit Collateral
-        uint256 amountDeposit = 100 ether;
+    //MintSSC
+    function testMintSscSucceeds() public {
+        uint256 COLLATERAL_AMOUNT = 500 ether;
+
+        // Approve CollateralManager to spend user's WETH
         vm.startPrank(user);
-        wethMock.approve(address(cm), amountDeposit);
-        cm.depositCollateral(address(wethMock), amountDeposit);
+        wethMock.approve(address(cm), COLLATERAL_AMOUNT);
 
-        uint256 amountToMint = 10 ether;
-        uint256 valueToMint = amountToMint * 2000;
-        cm.mintSsc(valueToMint);
+        // Deposit collateral
+        cm.depositCollateral(address(wethMock), COLLATERAL_AMOUNT);
 
-        // Arrange
-        uint256 redeemAmount = 60 ether; // 试图赎回超过用户的抵押品数量
-        // 使健康因子破裂
+        uint256 userInitialSscBalance = ssc.balanceOf(user);
+        uint256 SSC_TO_MINT = 100 ether;
 
-        // Act & Assert
-        vm.expectRevert(CollateralManager.CM__BreakHealthFactor.selector);
-        cm.redeemCollateral(address(wethMock), redeemAmount);
-    }
-
-    //////////////Test public view functions////////////////
-    function testGetUsdValue() public view {
-        //mock price of eth is 2000
-        uint256 amount = 1 ether;
-        uint256 expectedUsdValue = amount * 2000;
-        uint256 usdValue = cm.getUsdValue(address(wethMock), amount);
-
-        assertEq(usdValue, expectedUsdValue);
-    }
-
-    function testGetAccountCollateralValue() public {
-        // Deposit
-        uint256 amountDeposit = 100 ether;
-        vm.startPrank(user);
-        wethMock.approve(address(cm), amountDeposit);
-        cm.depositCollateral(address(wethMock), amountDeposit);
-
-        // Get value
-        uint256 totalCollateralValueInUsd = cm.getAccountCollateralValue(user);
+        // Mint SSC
+        cm.mintSsc(SSC_TO_MINT);
         vm.stopPrank();
 
-        uint256 expectedValue = cm.getUsdValue(address(wethMock), amountDeposit);
-        assertEq(totalCollateralValueInUsd, expectedValue);
+        // Check SSC balance of the user
+        uint256 userFinalSscBalance = ssc.balanceOf(user);
+        assertEq(userFinalSscBalance, userInitialSscBalance + SSC_TO_MINT);
+    }
+
+    function testMintSscFailsDueToLowCollateral() public {
+        uint256 COLLATERAL_AMOUNT = 500 ether; //500 * 2000 = 10000,00
+
+        // Approve CollateralManager to spend user's WETH
+        vm.startPrank(user);
+        wethMock.approve(address(cm), COLLATERAL_AMOUNT);
+
+        // Deposit collateral
+        cm.depositCollateral(address(wethMock), COLLATERAL_AMOUNT);
+
+        uint256 insufficientSscAmount = 500001 ether; // Trying to mint more than allowed based on collateral
+        //500000 fail; 500001 pass; means the calculation was correct
+        // Expect the mint to revert due to breaking health factor
+        vm.expectRevert();
+        cm.mintSsc(insufficientSscAmount);
+        vm.stopPrank();
+    }
+
+    //WithDrawCollateral
+    function testWithdrawCollateralSuccess() public {
+        uint256 INITIAL_COLLATERAL = 1000 ether;
+        uint256 MINT_AMOUNT = 100 ether * 2000;
+        uint256 WITHDRAW_AMOUNT = 800 ether;
+        //uint256 WITHDRAW_TOO_MUCH = 1100 ether;
+
+        // Deposit collateral
+        vm.startPrank(user);
+        wethMock.approve(address(cm), STARTING_USER_BALANCE);
+        cm.depositCollateral(address(wethMock), INITIAL_COLLATERAL); //1000 * 2000 = 2000,000
+        cm.mintSsc(MINT_AMOUNT); // 200,000 -> 400,000 needed
+
+        // User withdraws collateral
+        cm.withdrawCollateral(address(wethMock), WITHDRAW_AMOUNT); // 800 * 2000 = 1600,000
+
+        // Check the remaining collateral for the user
+        uint256 remainingCollateral = cm.getAccountCollateralValueETH(user, address(wethMock));
+        vm.stopPrank();
+        assertEq(remainingCollateral, INITIAL_COLLATERAL - WITHDRAW_AMOUNT);
+    }
+
+    function testWithdrawCollateralFailsBreakHealthFactor() public {
+        uint256 INITIAL_COLLATERAL = 1000 ether;
+        uint256 MINT_AMOUNT = 100 ether * 2000;
+        uint256 WITHDRAW_AMOUNT = 800 ether;
+        uint256 withdrawTooMuch = WITHDRAW_AMOUNT + 1;
+
+        // Deposit collateral
+        vm.startPrank(user);
+        wethMock.approve(address(cm), STARTING_USER_BALANCE);
+        cm.depositCollateral(address(wethMock), INITIAL_COLLATERAL); //1000 * 2000 = 2000,000
+        cm.mintSsc(MINT_AMOUNT); // 200,000 -> 400,000 needed
+
+        // User withdraws collateral
+        vm.expectRevert(CollateralManager.CM__BreakHealthFactor.selector);
+        cm.withdrawCollateral(address(wethMock), withdrawTooMuch); // 800 * 2000 = 1600,000
+        vm.stopPrank();
+    }
+
+    function testWithdrawCollateralFailsTooMuch() public {
+        uint256 INITIAL_COLLATERAL = 500 ether;
+        uint256 MINT_AMOUNT = 100 ether * 2000;
+        uint256 WITHDRAW_AMOUNT = 600 ether; //Over than initial collateral
+
+        // Deposit collateral
+        vm.startPrank(user);
+        wethMock.approve(address(cm), STARTING_USER_BALANCE);
+        cm.depositCollateral(address(wethMock), INITIAL_COLLATERAL);
+        cm.mintSsc(MINT_AMOUNT);
+
+        // User withdraws collateral
+        vm.expectRevert(CollateralManager.CM__WithDrawTooMuchCollateral.selector);
+        cm.withdrawCollateral(address(wethMock), WITHDRAW_AMOUNT);
+        vm.stopPrank();
+    }
+
+    //Redeem
+    function testRedeemCollateral() public {
+        uint256 redeemAmount = 100 ether;
+        uint256 sscToBurn = redeemAmount * 2000;
+
+        vm.startPrank(user);
+        // User deposits collateral
+        wethMock.approve(address(cm), STARTING_USER_BALANCE);
+        ssc.approve(address(cm), sscToBurn);
+        cm.depositCollateral(weth, STARTING_USER_BALANCE);
+
+        // User mints SSC
+        cm.mintSsc(sscToBurn); // Mint 100 SSC * 2000
+
+        // User redeems collateral
+        uint256 collateralBalance = cm.getAccountCollateralValueETH(user, weth);
+        cm.redeemCollateral(weth, redeemAmount, sscToBurn);
+
+        // Verify the user's collateral balance after redeeming
+        uint256 newCollateralBalance = cm.getAccountCollateralValueETH(user, weth);
+        uint256 newMintedBalance = cm.getAccountMintedSSC(user);
+        vm.stopPrank();
+        assertEq(
+            newCollateralBalance,
+            collateralBalance - redeemAmount,
+            "User's collateral balance should increase after redeeming"
+        );
+
+        //Verify the user's minted SSC amount is reduced
+        assertEq(newMintedBalance, 0, "User's minted SSC amount should decrease after burning");
+    }
+
+    function testRedeemCollateralInsufficientCollateral() public {
+        uint256 depositAmount = 500 ether;
+        uint256 sscToBurn = depositAmount / 2 * 2000;
+        // User2 tries to redeem more collateral than they have
+        vm.startPrank(user);
+        wethMock.approve(address(cm), STARTING_USER_BALANCE);
+        ssc.approve(address(cm), sscToBurn);
+        cm.depositCollateral(weth, depositAmount);
+        cm.mintSsc(sscToBurn); // User2 mints 100 SSC
+
+        // Try to redeem more collateral than available
+        uint256 excessRedeemAmount = depositAmount + 1 ether;
+        vm.expectRevert(CollateralManager.CM__WithDrawTooMuchCollateral.selector);
+        cm.redeemCollateral(weth, excessRedeemAmount, sscToBurn);
+        vm.stopPrank();
+    }
+
+    function testRedeemCollateralInsufficientSSC() public {
+        uint256 depositAmount = 500 ether;
+        uint256 sscToBurn = depositAmount / 3 * 2000;
+        // User2 tries to redeem more collateral than they have
+        vm.startPrank(user);
+        wethMock.approve(address(cm), STARTING_USER_BALANCE);
+        ssc.approve(address(cm), sscToBurn);
+        cm.depositCollateral(weth, depositAmount);
+        cm.mintSsc(sscToBurn);
+
+        uint256 excessSscAmountToBurn = sscToBurn + 1; // More than the minted amount
+
+        vm.expectRevert(CollateralManager.CM__NotEnoughSSCToBurn.selector);
+        cm.redeemCollateral(weth, depositAmount, excessSscAmountToBurn);
+        vm.stopPrank();
+    }
+
+    //Liquidate
+    function testLiquidate() public {
+        // set the initial status
+        uint256 initialCollateralAmount = 100 ether;
+        uint256 debtToCover = 50 ether * 2000;
+
+        // 用户抵押资产
+        vm.startPrank(user);
+        wethMock.approve(address(cm), initialCollateralAmount);
+        wethMock.mint(user, initialCollateralAmount);
+        ssc.approve(address(cm), debtToCover + 1);
+        cm.depositCollateral(address(wethMock), initialCollateralAmount);
+
+        cm.mintSsc(debtToCover);
+
+        //触发清算
+        cm.reviseMintedSSCForTest(user);
+
+        // 确保用户的健康因子已低于允许值，
+        uint256 userHealthFactor = cm.calculateHealthFactor(user, weth);
+        assert(userHealthFactor < MIN_HEALTH_FACTOR);
+
+        // 确认清算前的状态
+        uint256 initialCollateralBalance = cm.getAccountCollateralValueETH(user, weth);
+        uint256 initialDebtBalance = cm.getAccountMintedSSC(user);
+
+        // 执行清算
+        cm.liquidate(address(wethMock), user, debtToCover);
+
+        // 确认清算后的状态
+        uint256 finalCollateralBalance = cm.getAccountCollateralValueETH(user, weth);
+        uint256 finalDebtBalance = cm.getAccountMintedSSC(user);
+        vm.stopPrank();
+
+        console.log(initialCollateralBalance, finalCollateralBalance);
+        console.log(initialDebtBalance, finalDebtBalance);
     }
 }

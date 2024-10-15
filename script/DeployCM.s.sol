@@ -16,8 +16,8 @@ import {HelperConfig} from "./HelperConfig.s.sol";
  */
 contract DeployCollateralManager is Script {
     //event ContractsDeployed(address indexed sscAddress, address indexed collateralManagerAddress);
-    address[] public tokenAddresses;
-    address[] public priceFeedAddresses;
+    address public tokenAddresses;
+    address public priceFeedAddresses;
 
     /**
      * @dev Deploys the SimpleStableCoin and CollateralManager contracts.
@@ -33,10 +33,9 @@ contract DeployCollateralManager is Script {
     function run() external returns (SimpleStableCoin, CollateralManager, HelperConfig) {
         HelperConfig helperConfig = new HelperConfig();
 
-        (address wethUsdPriceFeed, address wbtcUsdPriceFeed, address weth, address wbtc, uint256 deployerKey) =
-            helperConfig.activeNetworkConfig();
-        tokenAddresses = [weth, wbtc];
-        priceFeedAddresses = [wethUsdPriceFeed, wbtcUsdPriceFeed];
+        (address wethUsdPriceFeed, address weth, uint256 deployerKey) = helperConfig.activeNetworkConfig();
+        tokenAddresses = weth;
+        priceFeedAddresses = wethUsdPriceFeed;
 
         vm.startBroadcast(deployerKey);
         SimpleStableCoin ssc = new SimpleStableCoin();
