@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Script} from "forge-std/Script.sol";
+import {Script, console} from "forge-std/Script.sol";
 import {CollateralManager} from "../src/CollateralManager.sol";
 import {SimpleStableCoin} from "../src/SimpleStableCoin.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
@@ -32,15 +32,20 @@ contract DeployCollateralManager is Script {
      */
     function run() external returns (SimpleStableCoin, CollateralManager, HelperConfig) {
         HelperConfig helperConfig = new HelperConfig();
+        console.log("Deployed helperConfig at:", address(helperConfig));
 
         (address wethUsdPriceFeed, address weth, uint256 deployerKey) = helperConfig.activeNetworkConfig();
         tokenAddresses = weth;
         priceFeedAddresses = wethUsdPriceFeed;
+        console.log("weth address at:", weth);
+        console.log("priceFeedAddress:", priceFeedAddresses);
 
         vm.startBroadcast(deployerKey);
         SimpleStableCoin ssc = new SimpleStableCoin();
+        console.log("Deployed SimpleStableCoin at:", address(ssc));
 
         CollateralManager collateralManager = new CollateralManager(tokenAddresses, priceFeedAddresses, address(ssc));
+        console.log("Deployed CollateralManager at:", address(collateralManager));
         ssc.transferOwnership(address(collateralManager));
 
         //emit ContractsDeployed(address(ssc), address(collateralManager));

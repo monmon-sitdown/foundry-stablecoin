@@ -221,6 +221,15 @@ contract CollateralManager is ReentrancyGuard {
         return userMintedSsc[user];
     }
 
+    /*
+    function getRedeemableCollateral(address user, address token) external view returns (uint256) {
+        // 根据用户的抵押品和债务计算可赎回数量
+        uint256 collateral = userCollateral[user][token];
+        uint256 debt = getAccountMintedSSC(user);
+        // 逻辑计算
+    return collateral > debt ? debt : collateral;
+    }*/
+
     function calculateHealthFactor(address user, address tokenAddress) public view returns (uint256) {
         return _calculateHealthFactor(getAccountMintedSSC(user), getAccountCollateralValueUSD(user, tokenAddress));
     }

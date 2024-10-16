@@ -76,8 +76,8 @@ contract HelperConfig is Script {
         anvilNetworkConfig = NetworkConfig({
             wethUsdPriceFeed: address(ethUsdPriceFeed),
             weth: address(wethMock),
-            //deployerKey: GANACHE_PRIVATE_KEY //DEFAULT_ANVIL_PRIVATE_KEY
             deployerKey: DEFAULT_ANVIL_PRIVATE_KEY
         });
+        //deployerKey: ANACHE_PRIVATE_KEY
     }
 }
