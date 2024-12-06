@@ -105,7 +105,7 @@ contract CMTest is Test {
 
     //MintSSC
     function testMintSscSucceeds() public {
-        uint256 COLLATERAL_AMOUNT = 500 ether;
+        uint256 COLLATERAL_AMOUNT = 1 ether;
 
         // Approve CollateralManager to spend user's WETH
         vm.startPrank(user);
@@ -115,7 +115,7 @@ contract CMTest is Test {
         cm.depositCollateral(address(wethMock), COLLATERAL_AMOUNT);
 
         uint256 userInitialSscBalance = ssc.balanceOf(user);
-        uint256 SSC_TO_MINT = 100 ether;
+        uint256 SSC_TO_MINT = 1000 ether;
 
         // Mint SSC
         cm.mintSsc(SSC_TO_MINT);
